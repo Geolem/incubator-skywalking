@@ -46,12 +46,10 @@
         <module>nutz-plugins</module>
         <module>jetty-plugin</module>
         <module>spymemcached-2.x-plugin</module>
-        <module>sharding-jdbc-1.5.x-plugin</module>
         <module>sharding-sphere-3.x-plugin</module>
-        <module>sharding-sphere-4.x-plugin</module>
-        <module>sharding-sphere-4.x-RC3-plugin</module>
         <module>sharding-sphere-4.0.x-plugin</module>
         <module>sharding-sphere-4.1.0-plugin</module>
+        <module>shardingsphere-5.0.0-beta-plugin</module>
         <module>xmemcached-2.x-plugin</module>
         <module>grpc-1.x-plugin</module>
         <module>mysql-5.x-plugin</module>
@@ -86,7 +84,6 @@
         <module>solrj-7.x-plugin</module>
         <module>cassandra-java-driver-3.x-plugin</module>
         <module>light4j-plugins</module>
-        <module>ehcache-2.x-plugin</module>
         <module>pulsar-plugin</module>
         <module>netty-socketio-plugin</module>
         <module>armeria-0.84.x-plugin</module>
