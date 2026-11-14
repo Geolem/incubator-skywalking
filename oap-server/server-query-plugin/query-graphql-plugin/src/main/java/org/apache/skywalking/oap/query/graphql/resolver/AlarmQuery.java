@@ -18,24 +18,27 @@
 
 package org.apache.skywalking.oap.query.graphql.resolver;
 
-import com.coxautodev.graphql.tools.GraphQLQueryResolver;
-
+import graphql.kickstart.tools.GraphQLQueryResolver;
 import graphql.schema.DataFetchingEnvironment;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import org.apache.skywalking.oap.server.core.CoreModule;
 import org.apache.skywalking.oap.server.core.analysis.IDManager;
 import org.apache.skywalking.oap.server.core.analysis.manual.searchtag.Tag;
+import org.apache.skywalking.oap.server.core.analysis.manual.searchtag.TagType;
 import org.apache.skywalking.oap.server.core.query.AlarmQueryService;
 import org.apache.skywalking.oap.server.core.query.EventQueryService;
+import org.apache.skywalking.oap.server.core.query.TagAutoCompleteQueryService;
 import org.apache.skywalking.oap.server.core.query.enumeration.Scope;
 import org.apache.skywalking.oap.server.core.query.input.Duration;
 import org.apache.skywalking.oap.server.core.query.type.AlarmMessage;
-import org.apache.skywalking.oap.server.core.query.type.AlarmTrend;
 import org.apache.skywalking.oap.server.core.query.type.Alarms;
 import org.apache.skywalking.oap.server.core.query.type.Pagination;
 import org.apache.skywalking.oap.server.core.query.type.event.Event;
@@ -44,10 +47,12 @@ import org.apache.skywalking.oap.server.core.query.type.event.Source;
 import org.apache.skywalking.oap.server.core.source.DefaultScopeDefine;
 import org.apache.skywalking.oap.server.core.storage.query.IEventQueryDAO;
 import org.apache.skywalking.oap.server.library.module.ModuleManager;
+import org.apache.skywalking.oap.server.library.util.CollectionUtils;
 
 import static com.google.common.base.Strings.isNullOrEmpty;
 import static java.util.Objects.isNull;
 import static java.util.Objects.nonNull;
+import static org.apache.skywalking.oap.query.graphql.AsyncQueryUtils.queryAsync;
 import static org.apache.skywalking.oap.server.library.util.CollectionUtils.isNotEmpty;
 
 public class AlarmQuery implements GraphQLQueryResolver {
@@ -57,8 +62,13 @@ public class AlarmQuery implements GraphQLQueryResolver {
 
     private EventQueryService eventQueryService;
 
+    private TagAutoCompleteQueryService tagQueryService;
+
+    private final DecimalFormat valueFormat = new DecimalFormat();
+
     public AlarmQuery(ModuleManager moduleManager) {
         this.moduleManager = moduleManager;
+        this.valueFormat.setGroupingUsed(false);
     }
 
     private AlarmQueryService getQueryService() {
@@ -75,35 +85,99 @@ public class AlarmQuery implements GraphQLQueryResolver {
         return eventQueryService;
     }
 
-    public AlarmTrend getAlarmTrend(final Duration duration) {
-        return new AlarmTrend();
+    private TagAutoCompleteQueryService getTagQueryService() {
+        if (tagQueryService == null) {
+            this.tagQueryService = moduleManager.find(CoreModule.NAME).provider().getService(TagAutoCompleteQueryService.class);
+        }
+        return tagQueryService;
     }
 
-    public Alarms getAlarm(final Duration duration, final Scope scope, final String keyword,
+    public CompletableFuture<Alarms> getAlarm(final Duration duration, final Scope scope, final String keyword,
                            final Pagination paging, final List<Tag> tags,
-                           final DataFetchingEnvironment env) throws Exception {
-        Integer scopeId = null;
-        if (scope != null) {
-            scopeId = scope.getScopeId();
-        }
-        long startSecondTB = 0;
-        long endSecondTB = 0;
-        final EventQueryCondition.EventQueryConditionBuilder conditionPrototype = EventQueryCondition.builder().size(IEventQueryDAO.MAX_SIZE);
-        if (nonNull(duration)) {
-            startSecondTB = duration.getStartTimeBucketInSec();
-            endSecondTB = duration.getEndTimeBucketInSec();
-            conditionPrototype.time(duration);
-        }
-        Alarms alarms = getQueryService().getAlarm(
-            scopeId, keyword, paging, startSecondTB, endSecondTB, tags);
+                           final DataFetchingEnvironment env) {
+        return queryAsync(() -> {
+            Integer scopeId = null;
+            if (scope != null) {
+                scopeId = scope.getScopeId();
+            }
+            final EventQueryCondition.EventQueryConditionBuilder conditionPrototype =
+                EventQueryCondition.builder()
+                                   .paging(new Pagination(1, IEventQueryDAO.MAX_SIZE));
+            if (nonNull(duration)) {
+                conditionPrototype.time(duration);
+            }
+            Alarms alarms = getQueryService().getAlarm(
+                scopeId, keyword, paging, duration, tags);
 
-        final boolean selectEvents = env.getSelectionSet().get().entrySet().stream().anyMatch(it -> it.getKey().contains("/events/"));
+            alarms.getMsgs().forEach(msg -> {
+                msg.getSnapshot().getMetrics().forEach(metric -> {
+                    metric.getResults().forEach(mqeValues -> {
+                        mqeValues.getValues().forEach(mqeValue -> {
+                            if (!mqeValue.isEmptyValue()) {
+                                mqeValue.setValue(valueFormat.format(mqeValue.getDoubleValue()));
+                            }
+                        });
+                    });
+                });
+            });
 
-        if (selectEvents) {
-            return findRelevantEvents(alarms, conditionPrototype);
-        }
+            final boolean selectEvents = env.getSelectionSet().contains("**/events/**");
 
-        return alarms;
+            if (selectEvents) {
+                return findRelevantEvents(alarms, conditionPrototype);
+            }
+
+            return alarms;
+        });
+    }
+
+    /**
+     * Comprehensive alarm query — entity / layer / ruleName / keyword / tag
+     * filters bundled under {@link org.apache.skywalking.oap.server.core.query.input.AlarmQueryCondition}.
+     * Mirrors GraphQL {@code queryAlarms(condition)}.
+     *
+     * @since 11.0.0
+     */
+    public CompletableFuture<Alarms> queryAlarms(
+            final org.apache.skywalking.oap.server.core.query.input.AlarmQueryCondition condition,
+            final DataFetchingEnvironment env) {
+        return queryAsync(() -> {
+            final EventQueryCondition.EventQueryConditionBuilder conditionPrototype =
+                EventQueryCondition.builder()
+                                   .paging(new Pagination(1, IEventQueryDAO.MAX_SIZE));
+            if (nonNull(condition.getDuration())) {
+                conditionPrototype.time(condition.getDuration());
+            }
+            Alarms alarms = getQueryService().queryAlarms(condition);
+
+            alarms.getMsgs().forEach(msg -> {
+                msg.getSnapshot().getMetrics().forEach(metric -> {
+                    metric.getResults().forEach(mqeValues -> {
+                        mqeValues.getValues().forEach(mqeValue -> {
+                            if (!mqeValue.isEmptyValue()) {
+                                mqeValue.setValue(valueFormat.format(mqeValue.getDoubleValue()));
+                            }
+                        });
+                    });
+                });
+            });
+
+            final boolean selectEvents = env.getSelectionSet().contains("**/events/**");
+
+            if (selectEvents) {
+                return findRelevantEvents(alarms, conditionPrototype);
+            }
+
+            return alarms;
+        });
+    }
+
+    public CompletableFuture<Set<String>> queryAlarmTagAutocompleteKeys(final Duration queryDuration) {
+        return queryAsync(() -> getTagQueryService().queryTagAutocompleteKeys(TagType.ALARM, queryDuration));
+    }
+
+    public CompletableFuture<Set<String>> queryAlarmTagAutocompleteValues(final String tagKey, final Duration queryDuration) {
+        return queryAsync(() -> getTagQueryService().queryTagAutocompleteValues(TagType.ALARM, tagKey, queryDuration));
     }
 
     private Alarms findRelevantEvents(
@@ -111,7 +185,7 @@ public class AlarmQuery implements GraphQLQueryResolver {
         final EventQueryCondition.EventQueryConditionBuilder conditionPrototype
     ) throws Exception {
 
-        if (alarms.getTotal() < 1) {
+        if (CollectionUtils.isEmpty(alarms.getMsgs())) {
             return alarms;
         }
 

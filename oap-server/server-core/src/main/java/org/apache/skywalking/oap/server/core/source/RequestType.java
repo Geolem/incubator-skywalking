@@ -30,5 +30,7 @@ public enum RequestType {
      * Logic request only.
      */
     LOGIC,
-    TCP
+    TCP,
+    MQ,
+    GenAI
 }

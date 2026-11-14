@@ -21,8 +21,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.skywalking.apm.network.logging.v3.LogData;
-import org.apache.skywalking.oap.log.analyzer.module.LogAnalyzerModule;
-import org.apache.skywalking.oap.log.analyzer.provider.log.ILogAnalyzerService;
+import org.apache.skywalking.oap.server.core.source.LogMetadataUtils;
+import org.apache.skywalking.oap.log.analyzer.v2.module.LogAnalyzerModule;
+import org.apache.skywalking.oap.log.analyzer.v2.provider.log.ILogAnalyzerService;
 import org.apache.skywalking.oap.server.analyzer.agent.kafka.module.KafkaFetcherConfig;
 import org.apache.skywalking.oap.server.library.module.ModuleManager;
 import org.apache.skywalking.oap.server.telemetry.TelemetryModule;
@@ -32,16 +33,15 @@ import org.apache.skywalking.oap.server.telemetry.api.MetricsCreator;
 import org.apache.skywalking.oap.server.telemetry.api.MetricsTag;
 
 @Slf4j
-public class LogHandler implements KafkaHandler {
+public class LogHandler extends AbstractKafkaHandler {
 
-    private final KafkaFetcherConfig config;
     private final HistogramMetrics histogram;
     private final CounterMetrics errorCounter;
     private final ILogAnalyzerService logAnalyzerService;
 
     public LogHandler(final ModuleManager moduleManager,
                       final KafkaFetcherConfig config) {
-        this.config = config;
+        super(moduleManager, config);
         this.logAnalyzerService = moduleManager.find(LogAnalyzerModule.NAME)
                                                .provider()
                                                .getService(ILogAnalyzerService.class);
@@ -64,20 +64,15 @@ public class LogHandler implements KafkaHandler {
     }
 
     @Override
-    public String getConsumePartitions() {
-        return config.getConsumePartitions();
-    }
-
-    @Override
-    public String getTopic() {
+    protected String getPlainTopic() {
         return config.getTopicNameOfLogs();
     }
 
     @Override
     public void handle(final ConsumerRecord<String, Bytes> record) {
         try (HistogramMetrics.Timer ignore = histogram.createTimer()) {
-            LogData logData = parseConsumerRecord(record);
-            logAnalyzerService.doAnalysis(logData);
+            LogData.Builder builder = parseConsumerRecord(record).toBuilder();
+            logAnalyzerService.doAnalysis(LogMetadataUtils.fromLogData(builder), builder);
         } catch (Exception e) {
             errorCounter.inc();
             log.error(e.getMessage(), e);

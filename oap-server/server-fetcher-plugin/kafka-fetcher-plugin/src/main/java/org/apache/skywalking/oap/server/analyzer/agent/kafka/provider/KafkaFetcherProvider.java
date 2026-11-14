@@ -19,9 +19,7 @@
 package org.apache.skywalking.oap.server.analyzer.agent.kafka.provider;
 
 import lombok.extern.slf4j.Slf4j;
-import org.apache.skywalking.oap.log.analyzer.module.LogAnalyzerModule;
-import org.apache.skywalking.oap.meter.analyzer.prometheus.rule.Rule;
-import org.apache.skywalking.oap.meter.analyzer.prometheus.rule.Rules;
+import org.apache.skywalking.oap.log.analyzer.v2.module.LogAnalyzerModule;
 import org.apache.skywalking.oap.server.analyzer.agent.kafka.KafkaFetcherHandlerRegister;
 import org.apache.skywalking.oap.server.analyzer.agent.kafka.module.KafkaFetcherConfig;
 import org.apache.skywalking.oap.server.analyzer.agent.kafka.module.KafkaFetcherModule;
@@ -34,24 +32,17 @@ import org.apache.skywalking.oap.server.analyzer.agent.kafka.provider.handler.Se
 import org.apache.skywalking.oap.server.analyzer.agent.kafka.provider.handler.TraceSegmentHandler;
 import org.apache.skywalking.oap.server.analyzer.module.AnalyzerModule;
 import org.apache.skywalking.oap.server.core.CoreModule;
-import org.apache.skywalking.oap.server.library.module.ModuleConfig;
 import org.apache.skywalking.oap.server.library.module.ModuleDefine;
 import org.apache.skywalking.oap.server.library.module.ModuleProvider;
 import org.apache.skywalking.oap.server.library.module.ModuleStartException;
 import org.apache.skywalking.oap.server.library.module.ServiceNotProvidedException;
 import org.apache.skywalking.oap.server.telemetry.TelemetryModule;
-
-import java.util.Collections;
-import java.util.List;
+import org.apache.skywalking.oap.trace.analyzer.v2.module.TraceAnalyzerModule;
 
 @Slf4j
 public class KafkaFetcherProvider extends ModuleProvider {
     private KafkaFetcherHandlerRegister handlerRegister;
     private KafkaFetcherConfig config;
-
-    public KafkaFetcherProvider() {
-        config = new KafkaFetcherConfig();
-    }
 
     @Override
     public String name() {
@@ -64,26 +55,33 @@ public class KafkaFetcherProvider extends ModuleProvider {
     }
 
     @Override
-    public ModuleConfig createConfigBeanIfAbsent() {
-        return config;
+    public ConfigCreator newConfigCreator() {
+        return new ConfigCreator<KafkaFetcherConfig>() {
+            @Override
+            public Class type() {
+                return KafkaFetcherConfig.class;
+            }
+
+            @Override
+            public void onInitialized(final KafkaFetcherConfig initialized) {
+                config = initialized;
+            }
+        };
     }
 
     @Override
-    public void prepare() throws ServiceNotProvidedException, ModuleStartException {
+    public void prepare() throws ServiceNotProvidedException {
         handlerRegister = new KafkaFetcherHandlerRegister(config);
     }
 
     @Override
     public void start() throws ServiceNotProvidedException, ModuleStartException {
-        List<Rule> rules = Rules.loadRules("jvm-metrics-rules", Collections.singletonList("jvm"));
-        handlerRegister.register(new JVMMetricsHandler(getManager(), config, rules));
+        handlerRegister.register(new JVMMetricsHandler(getManager(), config));
         handlerRegister.register(new ServiceManagementHandler(getManager(), config));
         handlerRegister.register(new TraceSegmentHandler(getManager(), config));
         handlerRegister.register(new ProfileTaskHandler(getManager(), config));
+        handlerRegister.register(new MeterServiceHandler(getManager(), config));
 
-        if (config.isEnableMeterSystem()) {
-            handlerRegister.register(new MeterServiceHandler(getManager(), config));
-        }
         if (config.isEnableNativeProtoLog()) {
             handlerRegister.register(new LogHandler(getManager(), config));
         }
@@ -103,6 +101,7 @@ public class KafkaFetcherProvider extends ModuleProvider {
         return new String[] {
             TelemetryModule.NAME,
             AnalyzerModule.NAME,
+            TraceAnalyzerModule.NAME,
             LogAnalyzerModule.NAME,
             CoreModule.NAME
         };

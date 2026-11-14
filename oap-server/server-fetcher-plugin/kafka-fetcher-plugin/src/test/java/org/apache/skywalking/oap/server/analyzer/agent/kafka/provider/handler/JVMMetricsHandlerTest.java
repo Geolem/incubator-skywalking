@@ -19,8 +19,6 @@
 package org.apache.skywalking.oap.server.analyzer.agent.kafka.provider.handler;
 
 import com.google.common.collect.Lists;
-
-import java.util.ArrayList;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.utils.Bytes;
 import org.apache.skywalking.apm.network.common.v3.CPU;
@@ -29,19 +27,30 @@ import org.apache.skywalking.apm.network.language.agent.v3.JVMMetric;
 import org.apache.skywalking.apm.network.language.agent.v3.JVMMetricCollection;
 import org.apache.skywalking.apm.network.language.agent.v3.Memory;
 import org.apache.skywalking.apm.network.language.agent.v3.MemoryPool;
+import org.apache.skywalking.oap.server.analyzer.agent.kafka.mock.MockModuleManager;
+import org.apache.skywalking.oap.server.analyzer.agent.kafka.mock.MockModuleProvider;
+import org.apache.skywalking.oap.server.analyzer.agent.kafka.module.KafkaFetcherConfig;
 import org.apache.skywalking.oap.server.core.CoreModule;
 import org.apache.skywalking.oap.server.core.config.NamingControl;
 import org.apache.skywalking.oap.server.core.config.group.EndpointNameGrouping;
+import org.apache.skywalking.oap.server.core.source.ISource;
+import org.apache.skywalking.oap.server.core.source.ServiceInstanceJVMCPU;
+import org.apache.skywalking.oap.server.core.source.ServiceInstanceJVMGC;
+import org.apache.skywalking.oap.server.core.source.ServiceInstanceJVMMemory;
+import org.apache.skywalking.oap.server.core.source.ServiceInstanceJVMMemoryPool;
+import org.apache.skywalking.oap.server.core.source.SourceReceiver;
 import org.apache.skywalking.oap.server.library.module.ModuleManager;
-import org.apache.skywalking.oap.server.analyzer.agent.kafka.module.KafkaFetcherConfig;
-import org.apache.skywalking.oap.server.analyzer.agent.kafka.mock.MockModuleManager;
-import org.apache.skywalking.oap.server.analyzer.agent.kafka.mock.MockModuleProvider;
 import org.apache.skywalking.oap.server.telemetry.TelemetryModule;
 import org.apache.skywalking.oap.server.telemetry.api.MetricsCreator;
 import org.apache.skywalking.oap.server.telemetry.none.MetricsCreatorNoop;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+
+import java.util.List;
+
+import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 public class JVMMetricsHandlerTest {
     private static final String TOPIC_NAME = "skywalking-metrics";
@@ -50,7 +59,21 @@ public class JVMMetricsHandlerTest {
 
     private ModuleManager manager;
 
-    @Before
+    @RegisterExtension
+    public final SourceReceiverRule sourceReceiverRule = new SourceReceiverRule() {
+
+        @Override
+        protected void verify(final List<ISource> sourceList) {
+            Assertions.assertTrue(sourceList.get(0) instanceof ServiceInstanceJVMCPU);
+            ServiceInstanceJVMCPU serviceInstanceJVMCPU = (ServiceInstanceJVMCPU) sourceList.get(0);
+            assertThat(serviceInstanceJVMCPU.getUsePercent()).isEqualTo(1.0);
+            Assertions.assertTrue(sourceList.get(1) instanceof ServiceInstanceJVMMemory);
+            Assertions.assertTrue(sourceList.get(2) instanceof ServiceInstanceJVMMemoryPool);
+            Assertions.assertTrue(sourceList.get(3) instanceof ServiceInstanceJVMGC);
+        }
+    };
+
+    @BeforeEach
     public void setup() {
         manager = new MockModuleManager() {
             @Override
@@ -60,6 +83,7 @@ public class JVMMetricsHandlerTest {
                     protected void register() {
                         registerServiceImplementation(NamingControl.class, new NamingControl(
                             512, 512, 512, new EndpointNameGrouping()));
+                        registerServiceImplementation(SourceReceiver.class, sourceReceiverRule);
                     }
                 });
                 register(TelemetryModule.NAME, () -> new MockModuleProvider() {
@@ -70,12 +94,12 @@ public class JVMMetricsHandlerTest {
                 });
             }
         };
-        handler = new JVMMetricsHandler(manager, config, new ArrayList<>());
+        handler = new JVMMetricsHandler(manager, config);
     }
 
     @Test
     public void testTopicName() {
-        Assert.assertEquals(handler.getTopic(), TOPIC_NAME);
+        Assertions.assertEquals(handler.getTopic(), TOPIC_NAME);
     }
 
     @Test

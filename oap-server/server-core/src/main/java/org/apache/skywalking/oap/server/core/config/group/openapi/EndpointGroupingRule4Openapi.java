@@ -22,7 +22,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 import lombok.Getter;
-import org.apache.skywalking.apm.util.StringFormatGroup;
+import org.apache.skywalking.oap.server.library.util.StringFormatGroup;
 
 public class EndpointGroupingRule4Openapi {
     private final Map<String/*serviceName*/, Map<String/*endpointName*/, String/*endpointGroupName*/>> directLookup = new HashMap<>();
@@ -44,7 +44,7 @@ public class EndpointGroupingRule4Openapi {
     public StringFormatGroup.FormatResult format(String service, String endpointName) {
         Map<String, String> endpointNameLookup = directLookup.get(service);
         if (endpointNameLookup != null && endpointNameLookup.get(endpointName) != null) {
-            return new StringFormatGroup.FormatResult(true, endpointNameLookup.get(endpointName), endpointName);
+            return new StringFormatGroup.FormatResult(true, endpointName, endpointNameLookup.get(endpointName));
         }
 
         Map<String, StringFormatGroup> rules = groupedRules.get(service);

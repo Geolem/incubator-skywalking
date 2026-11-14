@@ -18,6 +18,8 @@
 package org.apache.skywalking.oap.server.analyzer.agent.kafka.provider.handler;
 
 import java.io.IOException;
+
+import java.nio.charset.StandardCharsets;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.utils.Bytes;
@@ -37,19 +39,19 @@ public class JsonLogHandler extends LogHandler {
     }
 
     @Override
-    public String getTopic() {
+    public String getPlainTopic() {
         return config.getTopicNameOfJsonLogs();
     }
-    
+
     @Override
     protected String getDataFormat() {
         return "json";
     }
-    
+
     @Override
     protected LogData parseConsumerRecord(ConsumerRecord<String, Bytes> record) throws IOException {
         LogData.Builder logDataBuilder = LogData.newBuilder();
-        ProtoBufJsonUtils.fromJSON(record.value().toString(), logDataBuilder);
+        ProtoBufJsonUtils.fromJSON(new String(record.value().get(), StandardCharsets.UTF_8), logDataBuilder);
         return logDataBuilder.build();
     }
 }

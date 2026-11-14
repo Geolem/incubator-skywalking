@@ -18,11 +18,9 @@
 
 package org.apache.skywalking.oap.server.receiver.jvm.provider;
 
-import org.apache.skywalking.oap.meter.analyzer.prometheus.rule.Rule;
-import org.apache.skywalking.oap.meter.analyzer.prometheus.rule.Rules;
 import org.apache.skywalking.oap.server.core.CoreModule;
+import org.apache.skywalking.oap.server.core.oal.rt.OALEngineLoaderService;
 import org.apache.skywalking.oap.server.core.server.GRPCHandlerRegister;
-import org.apache.skywalking.oap.server.library.module.ModuleConfig;
 import org.apache.skywalking.oap.server.library.module.ModuleDefine;
 import org.apache.skywalking.oap.server.library.module.ModuleProvider;
 import org.apache.skywalking.oap.server.library.module.ModuleStartException;
@@ -30,9 +28,6 @@ import org.apache.skywalking.oap.server.receiver.jvm.module.JVMModule;
 import org.apache.skywalking.oap.server.receiver.jvm.provider.handler.JVMMetricReportServiceHandler;
 import org.apache.skywalking.oap.server.receiver.jvm.provider.handler.JVMMetricReportServiceHandlerCompat;
 import org.apache.skywalking.oap.server.receiver.sharing.server.SharingServerModule;
-
-import java.util.Collections;
-import java.util.List;
 
 public class JVMModuleProvider extends ModuleProvider {
 
@@ -47,7 +42,7 @@ public class JVMModuleProvider extends ModuleProvider {
     }
 
     @Override
-    public ModuleConfig createConfigBeanIfAbsent() {
+    public ConfigCreator newConfigCreator() {
         return null;
     }
 
@@ -57,12 +52,16 @@ public class JVMModuleProvider extends ModuleProvider {
 
     @Override
     public void start() throws ModuleStartException {
-        List<Rule> rules = Rules.loadRules("jvm-metrics-rules", Collections.singletonList("jvm"));
-        JVMMetricReportServiceHandler jvmMetricReportServiceHandler = new JVMMetricReportServiceHandler(getManager(), rules);
+        // load official analysis
+        getManager().find(CoreModule.NAME)
+                    .provider()
+                    .getService(OALEngineLoaderService.class)
+                    .load(JVMOALDefine.INSTANCE);
 
         GRPCHandlerRegister grpcHandlerRegister = getManager().find(SharingServerModule.NAME)
                                                               .provider()
                                                               .getService(GRPCHandlerRegister.class);
+        JVMMetricReportServiceHandler jvmMetricReportServiceHandler = new JVMMetricReportServiceHandler(getManager());
         grpcHandlerRegister.addHandler(jvmMetricReportServiceHandler);
         grpcHandlerRegister.addHandler(new JVMMetricReportServiceHandlerCompat(jvmMetricReportServiceHandler));
     }

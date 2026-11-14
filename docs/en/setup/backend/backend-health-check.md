@@ -1,6 +1,6 @@
 # Health Check
 
-Health check intends to provide a unique approach to check the health status of the OAP server. It includes the health status
+Health check intends to provide a unique approach to checking the health status of the OAP server. It includes the health status
 of modules, GraphQL, and gRPC services readiness.
 
 > 0 means healthy, and more than 0 means unhealthy.
@@ -17,8 +17,10 @@ health-checker:
 ```
 Note: The `telemetry` module should be enabled at the same time. This means that the provider should not be `-` and `none`.
 
-After that, we can check the OAP server health status by querying GraphQL:
+After that, we can check the OAP server health status by querying the http endpoint: `/healthcheck`,
+see [the health check http endpoint doc](../../api/health-check.md).
 
+You can also query the healthiness via other methods like GraphQL, see following.
 ```
 query{
   checkHealth{
@@ -65,4 +67,31 @@ You may use the [grpc-health-probe](https://github.com/grpc-ecosystem/grpc-healt
 health of OAP gRPC services.
 
 ## CLI tool
-Please follow the [CLI doc](https://github.com/apache/skywalking-cli#checkhealth) to get the health status score directly through the `checkhealth` command.
+
+The `swctl` CLI ships a `health` subcommand that runs the GraphQL `checkHealth`
+query (and, by default, the gRPC `HealthCheck` service) and exits with a
+non-zero status when the OAP is unhealthy.
+
+```bash
+# Plain gRPC
+swctl --base-url=http://OAP:12800/graphql health
+
+# OAP gRPC with TLS (cert verification is intentionally skipped)
+swctl --base-url=http://OAP:12800/graphql health --grpcTLS=true
+```
+
+### Reading the response
+
+A healthy OAP returns the same `score: 0` envelope shown in the GraphQL
+section above and the process exits 0. A failing run prints the GraphQL /
+gRPC error and exits non-zero — straightforward to wire into a shell readiness
+loop:
+
+```bash
+if swctl --base-url=http://OAP:12800/graphql health >/dev/null 2>&1; then
+  echo "OAP healthy"
+else
+  echo "OAP not healthy"
+  exit 1
+fi
+```
